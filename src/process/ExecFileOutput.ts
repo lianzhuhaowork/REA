@@ -21,7 +21,7 @@ type ExecFileOutputOptions = Omit<
 };
 
 /** How long a stopped process may take to exit before it is killed. */
-const STOP_GRACE_MS = 5_000;
+export const EXEC_FILE_OUTPUT_STOP_GRACE_MS = 5_000;
 
 /** Cancellation observed by the command owner, with the caller's exact reason. */
 export class ExecFileOutputCancelledError extends Error {
@@ -83,6 +83,8 @@ export interface ExecFileOutputFailure {
   readonly stdoutBytes?: number;
   readonly stderrBytes?: number;
   readonly collectionFailure?: boolean;
+  /** Leader PID for a stoppable command; unset when spawn never reported one. */
+  readonly leaderPid?: number;
 }
 
 /** Read captured output metadata from a failed execFileOutput invocation. */
@@ -99,6 +101,7 @@ export const execFileOutputFailure = (
   const stdoutBytes = Reflect.get(cause, "stdoutBytes");
   const stderrBytes = Reflect.get(cause, "stderrBytes");
   const collectionFailure = Reflect.get(cause, "collectionFailure");
+  const leaderPid = Reflect.get(cause, "leaderPid");
   if (typeof stdout !== "string" || typeof stderr !== "string")
     return undefined;
   return {
@@ -120,6 +123,11 @@ export const execFileOutputFailure = (
     outputTruncated:
       outputTruncated === true || code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
     ...(collectionFailure === true ? { collectionFailure: true } : {}),
+    ...(typeof leaderPid === "number" &&
+    Number.isSafeInteger(leaderPid) &&
+    leaderPid > 0
+      ? { leaderPid }
+      : {}),
   };
 };
 
@@ -143,6 +151,10 @@ export const execFileBytes = (
     let stopped: "abort" | "timeout" | undefined;
     let deadline: NodeJS.Timeout | undefined;
     let grace: NodeJS.Timeout | undefined;
+    let leaderPid: number | undefined;
+    const attachLeaderPid = (value: object): void => {
+      if (leaderPid !== undefined) Reflect.set(value, "leaderPid", leaderPid);
+    };
     const child = execFile(
       command,
       [...arguments_],
@@ -177,18 +189,23 @@ export const execFileBytes = (
           Reflect.set(failure, "stderr", stderr.toString("utf8"));
           Reflect.set(failure, "stdoutBytes", stdout.byteLength);
           Reflect.set(failure, "stderrBytes", stderr.byteLength);
+          attachLeaderPid(failure);
           reject(failure);
           return;
         }
         resolve({ stdout, stderr });
       },
     );
+    if (child.pid !== undefined) leaderPid = child.pid;
     // The first stop request names the failure; a later one is not resent.
     const stop = (reason: "abort" | "timeout"): void => {
       if (stopped !== undefined) return;
       stopped = reason;
       child.kill(stopSignal);
-      grace = setTimeout(() => child.kill("SIGKILL"), STOP_GRACE_MS);
+      grace = setTimeout(
+        () => child.kill("SIGKILL"),
+        EXEC_FILE_OUTPUT_STOP_GRACE_MS,
+      );
     };
     const onAbort = (): void => {
       stop("abort");

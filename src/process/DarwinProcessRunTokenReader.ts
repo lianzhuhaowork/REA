@@ -462,6 +462,7 @@ export const createDarwinProcessRunTokenReader = (
   ): Promise<string> => {
     const signal = operation.controller.signal;
     let operationRoot: ProcessReaderRoot | undefined;
+    let compilerEnvironment: NodeJS.ProcessEnv | undefined;
     try {
       if (
         compiler.kind === "swiftc" &&
@@ -483,7 +484,7 @@ export const createDarwinProcessRunTokenReader = (
       // the root that cleanup removes.
       const compilerTemporary = join(operationRoot.path, "tmp");
       await mkdir(compilerTemporary);
-      const compilerEnvironment: NodeJS.ProcessEnv = {
+      compilerEnvironment = {
         ...process.env,
         TMPDIR: compilerTemporary,
       };

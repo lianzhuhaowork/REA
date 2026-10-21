@@ -12,6 +12,8 @@ import type { NativeUiHelper } from "./NativeUiObservation.js";
 import { NATIVE_UI_HELPER_MAX_BUFFER } from "./NativeUiOutputBudget.js";
 import { NATIVE_UI_DEADLINE_MS } from "./NativeUiInterruptionControl.js";
 
+const NATIVE_UI_COMPILE_TIMEOUT_MS = 60_000;
+
 export interface NativeUiHelperRuntime {
   readonly invoke: NativeUiHelper;
   readonly cleanupLease: AnalysisCleanupLease;
@@ -50,6 +52,10 @@ export const createNativeUiHelperRuntime = (
     // Keep swiftc's intermediate objects inside the removable root.
     const compilerTemporary = join(root, "tmp");
     await mkdir(compilerTemporary);
+    const compilerEnvironment = {
+      ...selectedEnvironment,
+      TMPDIR: compilerTemporary,
+    };
     await execFileOutput(
       "/usr/bin/xcrun",
       [
@@ -67,10 +73,10 @@ export const createNativeUiHelperRuntime = (
         output,
       ],
       {
-        timeout: 60_000,
+        timeout: NATIVE_UI_COMPILE_TIMEOUT_MS,
         maxBuffer: 1024 * 1024,
         stopSignal: SWIFTC_INTERRUPT,
-        env: { ...selectedEnvironment, TMPDIR: compilerTemporary },
+        env: compilerEnvironment,
         signal,
       },
     );
